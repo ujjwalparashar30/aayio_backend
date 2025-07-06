@@ -1,0 +1,50 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "rimraf dist && npx tsc",
+    "start": "npm run build && node dist/index.js",
+    "dev": "npm run build && concurrently \"npx tsc -w\" \"nodemon --exec ts-node src/index.ts\"",
+    "seed": "ts-node prisma/seed.ts",
+    "prisma:generate": "prisma generate",
+    "postprisma:generate": "shx cp -r node_modules/.prisma/client/index.d.ts ../client/src/types/prismaTypes.d.ts"
+  },
+  "keywords": [],
+  "author": "Ujjwal Parashar",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.821.0",
+    "@aws-sdk/lib-storage": "^3.821.0",
+    "@clerk/clerk-sdk-node": "^4.13.23",
+    "@prisma/client": "^6.11.1",
+    "@terraformer/wkt": "^2.2.1",
+    "axios": "^1.9.0",
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.0",
+    "prisma": "^6.11.1",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.18",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/morgan": "^1.9.9",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.15.29",
+    "@types/terraformer__wkt": "^2.0.3",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^9.1.2",
+    "nodemon": "^3.1.10",
+    "rimraf": "^6.0.1",
+    "shx": "^0.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
