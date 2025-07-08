@@ -1,11 +1,12 @@
-// src/routes/authRoutes.ts
 import { Router } from 'express';
-import {syncUser } from '../controllers/authController';
-// import { authenticateToken } from '../middleware/auth';
+import { syncUser, handleWebhookCallback } from '../controllers/authController';
 
 const router = Router();
 
-router.get('/me',syncUser );
+// Remove the express.raw middleware from here since it's now in index.ts
+router.post("/webhooks", handleWebhookCallback);
 
+// Uncomment if you need the sync user route
+// router.get('/me', syncUser);
 
 export default router;

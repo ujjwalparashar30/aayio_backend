@@ -12,6 +12,9 @@ const morgan_1 = __importDefault(require("morgan"));
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
+// IMPORTANT: Raw body parser for webhooks MUST come before express.json()
+app.use('/api/webhooks', express_1.default.raw({ type: 'application/json' }));
+// Regular middleware for other routes
 app.use(express_1.default.json());
 app.use((0, helmet_1.default)());
 app.use(helmet_1.default.crossOriginResourcePolicy({ policy: "cross-origin" }));
@@ -22,7 +25,9 @@ app.use((0, cors_1.default)());
 app.get("/", (req, res) => {
     res.send("This is home route");
 });
+// API routes
 app.use('/api', authRoutes_1.default);
+// Fix the port number in console log
 app.listen(process.env.PORT || 3001, () => {
-    console.log(`Server is running on port ${process.env.PORT || 5000}`);
+    console.log(`Server is running on port ${process.env.PORT || 3001}`);
 });
