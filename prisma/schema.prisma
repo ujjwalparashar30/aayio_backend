@@ -14,17 +14,16 @@ datasource db {
 }
 
 model User {
-  id           Int       @id @default(autoincrement())
-  clerkUserId  String    @unique @map("clerk_user_id")
-  email        String
-  firstName    String?   @map("first_name")
-  lastName     String?   @map("last_name")
-  imageUrl     String?   @map("image_url")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  deletedAt    DateTime? @map("deleted_at")
+  id          String    @id @default(cuid())
+  clerkUserId String    @unique @map("clerk_user_id")
+  email       String
+  firstName   String?   @map("first_name")
+  lastName    String?   @map("last_name")
+  imageUrl    String?   @map("image_url")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
 
   // Add relationships to other models as needed
   @@map("users")
 }
-
