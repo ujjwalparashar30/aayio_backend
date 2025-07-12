@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -20,10 +14,404 @@ model User {
   firstName   String?   @map("first_name")
   lastName    String?   @map("last_name")
   imageUrl    String?   @map("image_url")
+  
+  // Enhanced wallet system
+  balance           Decimal @default(0) @db.Decimal(18, 8) @map("balance")
+  lockedBalance     Decimal @default(0) @db.Decimal(18, 8) @map("locked_balance")
+  
+  // P2P trading balances
+  p2pEscrowBalance  Decimal @default(0) @db.Decimal(18, 8) @map("p2p_escrow_balance")
+  
+  totalDeposited    Decimal @default(0) @db.Decimal(18, 8) @map("total_deposited")
+  totalWithdrawn    Decimal @default(0) @db.Decimal(18, 8) @map("total_withdrawn")
+  minimumBalance    Decimal @default(10) @db.Decimal(18, 8) @map("minimum_balance")
+  
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
-  // Add relationships to other models as needed
+  // Relationships
+  yesTokenHoldings   YesTokenHolding[]
+  noTokenHoldings    NoTokenHolding[]
+  transactions       Transaction[]
+  walletTransactions WalletTransaction[]
+  p2pOrders          P2POrder[]
+  payouts            Payout[]
+
   @@map("users")
+}
+
+model Admin {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  firstName   String?   @map("first_name")
+  lastName    String?   @map("last_name")
+  permissions String[]  // Array of permission strings
+  isActive    Boolean   @default(true) @map("is_active")
+  
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  // Relationships - Only admins can create questions
+  createdQuestions Question[] @relation("QuestionCreator")
+
+  @@map("admins")
+}
+
+model Question {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  category    String?
+  imageUrl    String?   @map("image_url")
+  
+  // Market mechanics
+  resolutionDate     DateTime @map("resolution_date")
+  isResolved         Boolean  @default(false) @map("is_resolved")
+  resolvedAnswer     Boolean? @map("resolved_answer")
+  
+  // Simple constant product fields
+  constantValue       Decimal @db.Decimal(18, 8) @map("constant_value")        // The K value (same for both)
+  
+  // Current state
+  totalYesTokens      Int     @map("total_yes_tokens")
+  totalNoTokens       Int     @map("total_no_tokens")
+  currentYesPrice     Decimal @db.Decimal(18, 8) @map("current_yes_price")
+  currentNoPrice      Decimal @db.Decimal(18, 8) @map("current_no_price")
+  
+  // Initial setup
+  initialTokenSupply  Int     @map("initial_token_supply")    // e.g., 1000 each
+  initialTokenPrice   Decimal @db.Decimal(18, 8) @map("initial_token_price")  // e.g., $1.00
+  
+  // Platform fee collection
+  collectedFees       Decimal @default(0) @db.Decimal(18, 8) @map("collected_fees")
+  platformFeeRate     Decimal @default(0.025) @db.Decimal(5, 4) @map("platform_fee_rate") // 2.5%
+  
+  status      QuestionStatus @default(ACTIVE)
+  createdById String         @map("created_by_id")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  
+  // Relationships
+  creator             Admin             @relation("QuestionCreator", fields: [createdById], references: [id])
+  yesToken            YesToken?
+  noToken             NoToken?
+  yesTokenHoldings    YesTokenHolding[]
+  noTokenHoldings     NoTokenHolding[]
+  transactions        Transaction[]
+  p2pOrders           P2POrder[]
+  marketResolution    MarketResolution?
+  
+  @@map("questions")
+}
+
+model YesToken {
+  id         String  @id @default(cuid())
+  questionId String  @unique @map("question_id")
+  
+  // Simplified constant product pricing
+  currentPrice        Decimal @db.Decimal(18, 8) @map("current_price")
+  availableSupply     Int     @map("available_supply")      // Tokens available for purchase
+  circulatingSupply   Int     @map("circulating_supply")    // Tokens held by users
+  
+  // Market statistics
+  totalVolume         Decimal @default(0) @db.Decimal(18, 8) @map("total_volume")
+  lastTradePrice      Decimal? @db.Decimal(18, 8) @map("last_trade_price")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  question  Question          @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  holdings  YesTokenHolding[]
+  
+  @@map("yes_tokens")
+}
+
+model NoToken {
+  id         String  @id @default(cuid())
+  questionId String  @unique @map("question_id")
+  
+  // Simplified constant product pricing
+  currentPrice        Decimal @db.Decimal(18, 8) @map("current_price")
+  availableSupply     Int     @map("available_supply")      // Tokens available for purchase
+  circulatingSupply   Int     @map("circulating_supply")    // Tokens held by users
+  
+  // Market statistics
+  totalVolume         Decimal @default(0) @db.Decimal(18, 8) @map("total_volume")
+  lastTradePrice      Decimal? @db.Decimal(18, 8) @map("last_trade_price")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  question  Question         @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  holdings  NoTokenHolding[]
+  
+  @@map("no_tokens")
+}
+
+model YesTokenHolding {
+  id         String @id @default(cuid())
+  userId     String @map("user_id")
+  questionId String @map("question_id")
+  
+  // Holdings data
+  quantity        Int     @map("quantity")
+  averageBuyPrice Decimal @db.Decimal(18, 8) @map("average_buy_price")
+  totalInvested   Decimal @db.Decimal(18, 8) @map("total_invested")
+  
+  // P2P selling capabilities
+  availableForSale Int     @default(0) @map("available_for_sale")
+  lockedInOrders   Int     @default(0) @map("locked_in_orders")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question  Question  @relation(fields: [questionId], references: [id], onDelete: Cascade, map: "yes_token_holding_question_fkey")
+  yesToken  YesToken  @relation(fields: [questionId], references: [questionId], onDelete: Cascade, map: "yes_token_holding_yes_token_fkey")
+  
+  @@unique([userId, questionId])
+  @@map("yes_token_holdings")
+}
+
+model NoTokenHolding {
+  id         String @id @default(cuid())
+  userId     String @map("user_id")
+  questionId String @map("question_id")
+  
+  // Holdings data
+  quantity        Int     @map("quantity")
+  averageBuyPrice Decimal @db.Decimal(18, 8) @map("average_buy_price")
+  totalInvested   Decimal @db.Decimal(18, 8) @map("total_invested")
+  
+  // P2P selling capabilities
+  availableForSale Int     @default(0) @map("available_for_sale")
+  lockedInOrders   Int     @default(0) @map("locked_in_orders")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade, map: "no_token_holding_question_fkey")
+  noToken  NoToken  @relation(fields: [questionId], references: [questionId], onDelete: Cascade, map: "no_token_holding_no_token_fkey")
+  
+  @@unique([userId, questionId])
+  @@map("no_token_holdings")
+}
+
+// P2P trading orders
+model P2POrder {
+  id         String @id @default(cuid())
+  userId     String @map("user_id")
+  questionId String @map("question_id")
+  
+  // Order details
+  orderType     P2POrderType
+  tokenType     TokenType @map("token_type")
+  quantity      Int
+  pricePerToken Decimal @db.Decimal(18, 8) @map("price_per_token")
+  totalAmount   Decimal @db.Decimal(18, 8) @map("total_amount")
+  
+  // Order status
+  status            P2POrderStatus @default(PENDING)
+  filledQuantity    Int           @default(0) @map("filled_quantity")
+  remainingQuantity Int           @map("remaining_quantity")
+  
+  // Matching and execution
+  matchedOrderId    String?   @map("matched_order_id")
+  executedAt        DateTime? @map("executed_at")
+  
+  // Expiration
+  expiresAt   DateTime? @map("expires_at")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  user         User         @relation(fields: [userId], references: [id])
+  question     Question     @relation(fields: [questionId], references: [id])
+  transactions Transaction[]
+  
+  @@map("p2p_orders")
+}
+
+// Market resolution and payouts
+model MarketResolution {
+  id         String @id @default(cuid())
+  questionId String @unique @map("question_id")
+  
+  // Resolution details
+  resolvedAnswer      Boolean   @map("resolved_answer")
+  resolutionDate      DateTime  @map("resolution_date")
+  totalPoolValue      Decimal   @db.Decimal(18, 8) @map("total_pool_value")
+  
+  // Fee calculation
+  platformFeeCollected Decimal @db.Decimal(18, 8) @map("platform_fee_collected")
+  winnerPoolValue     Decimal  @db.Decimal(18, 8) @map("winner_pool_value")
+  
+  // Payout statistics
+  totalWinnerTokens   Int      @map("total_winner_tokens")
+  payoutPerToken      Decimal  @db.Decimal(18, 8) @map("payout_per_token")
+  totalPayoutsSent    Decimal  @default(0) @db.Decimal(18, 8) @map("total_payouts_sent")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  payouts  Payout[]
+  
+  @@map("market_resolutions")
+}
+
+// Individual payouts
+model Payout {
+  id                 String @id @default(cuid())
+  userId             String @map("user_id")
+  marketResolutionId String @map("market_resolution_id")
+  
+  // Payout details
+  tokenQuantity      Int     @map("token_quantity")
+  payoutAmount       Decimal @db.Decimal(18, 8) @map("payout_amount")
+  payoutStatus       PayoutStatus @default(PENDING)
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  user             User             @relation(fields: [userId], references: [id])
+  marketResolution MarketResolution @relation(fields: [marketResolutionId], references: [id])
+  
+  @@map("payouts")
+}
+
+// Wallet transaction tracking for deposits/withdrawals
+model WalletTransaction {
+  id        String @id @default(cuid())
+  userId    String @map("user_id")
+  
+  type      WalletTransactionType
+  amount    Decimal @db.Decimal(18, 8)
+  
+  // Payment details
+  paymentMethod   String?  @map("payment_method") // "card", "bank_transfer", etc.
+  paymentId       String?  @map("payment_id")     // External payment processor ID
+  
+  // Transaction metadata
+  status          WalletTransactionStatus @default(PENDING)
+  description     String?
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  user User @relation(fields: [userId], references: [id])
+  
+  @@map("wallet_transactions")
+}
+
+// Enhanced transaction model
+model Transaction {
+  id         String @id @default(cuid())
+  userId     String @map("user_id")
+  questionId String @map("question_id")
+  
+  // Transaction types
+  type          TransactionType
+  source        TransactionSource @map("transaction_source")
+  tokenType     TokenType         @map("token_type")
+  quantity      Int
+  pricePerToken Decimal           @db.Decimal(18, 8) @map("price_per_token")
+  totalAmount   Decimal           @db.Decimal(18, 8) @map("total_amount")
+  
+  // P2P relationship tracking
+  p2pOrderId       String? @map("p2p_order_id")
+  counterpartyId   String? @map("counterparty_id") // For P2P trades
+  
+  // Fee tracking
+  platformFee      Decimal @default(0) @db.Decimal(18, 8) @map("platform_fee")
+  
+  status        TransactionStatus @default(COMPLETED)
+  txHash        String?          @map("tx_hash")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  user        User      @relation(fields: [userId], references: [id])
+  question    Question  @relation(fields: [questionId], references: [id])
+  p2pOrder    P2POrder? @relation(fields: [p2pOrderId], references: [id])
+  
+  @@map("transactions")
+}
+
+// Enums
+enum QuestionStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  RESOLVED
+  CANCELLED
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  MINT      // When new tokens are created for a question
+  BURN      // When tokens are destroyed
+  PAYOUT    // When question resolves and winners get paid
+}
+
+enum TransactionSource {
+  PLATFORM_MINT      // Buy directly from platform using constant product formula
+  P2P_TRADE         // Buy from another user
+  MARKET_RESOLUTION // Payout from resolved market
+}
+
+enum TokenType {
+  YES
+  NO
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum WalletTransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  REFUND
+}
+
+enum WalletTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum P2POrderType {
+  BUY
+  SELL
+}
+
+enum P2POrderStatus {
+  PENDING
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  EXPIRED
+}
+
+enum PayoutStatus {
+  PENDING
+  COMPLETED
+  FAILED
 }
