@@ -5,6 +5,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import routes from './routes/authRoutes';
+import questionRoutes from './routes/questionRoutes';
 
 dotenv.config();
 const app = express();
@@ -27,6 +28,7 @@ app.get("/", (req, res) => {
 
 // API routes
 app.use('/api', routes);
+app.use('/api/questions', questionRoutes);
 
 // Fix the port number in console log
 app.listen(process.env.PORT || 3001, () => {
