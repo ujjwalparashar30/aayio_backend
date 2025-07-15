@@ -28,7 +28,7 @@ app.get("/", (req, res) => {
 
 // API routes
 app.use('/api', routes);
-app.use('/api/questions', questionRoutes);
+app.use('/api/question', questionRoutes);
 
 // Fix the port number in console log
 app.listen(process.env.PORT || 3001, () => {
