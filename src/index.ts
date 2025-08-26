@@ -7,6 +7,8 @@ import morgan from "morgan";
 import routes from './routes/auth.route';
 import questionRoutes from './routes/question.route';
 import tradingRoutes from './routes/trading.route'; // Add this import
+import p2pRoutes from './routes/p2p.route'; // Import the new p2p routes
+import adminRoutes from './routes/admin.route'; // Import admin routes
 
 dotenv.config();
 const app = express();
@@ -31,6 +33,8 @@ app.get("/", (req, res) => {
 app.use('/api', routes);
 app.use('/api/question', questionRoutes);
 app.use('/api/trading', tradingRoutes); // Add this line
+app.use('/api/p2p', p2pRoutes); // Use the new p2p routes
+app.use('/api/admin', adminRoutes); // Use admin routes
 
 // Fix the port number in console log
 app.listen(process.env.PORT || 3001, () => {
