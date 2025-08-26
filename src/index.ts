@@ -4,8 +4,9 @@ import bodyParser from "body-parser";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
-import routes from './routes/authRoutes';
-import questionRoutes from './routes/questionRoutes';
+import routes from './routes/auth.route';
+import questionRoutes from './routes/question.route';
+import tradingRoutes from './routes/trading.route'; // Add this import
 
 dotenv.config();
 const app = express();
@@ -29,8 +30,9 @@ app.get("/", (req, res) => {
 // API routes
 app.use('/api', routes);
 app.use('/api/question', questionRoutes);
+app.use('/api/trading', tradingRoutes); // Add this line
 
 // Fix the port number in console log
 app.listen(process.env.PORT || 3001, () => {
-  console.log(`Server is running on port ${process.env.PORT || 3001}`);
+  console.log(`Server is running on port ${process.env.PORT || 3001}`); // Fixed the port number
 });

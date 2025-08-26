@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { syncUser, handleWebhookCallback } from '../controllers/authController';
+import { syncUser, handleWebhookCallback } from '../controllers/auth.controller';
 
 const router = Router();
 

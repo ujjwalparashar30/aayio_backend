@@ -4,7 +4,7 @@ import {
   getQuestionById,
   getQuestionPriceHistory,
   getQuestionOrderBook
-} from '../controllers/questionController';
+} from '../controllers/question.controller';
 
 const router = Router();
 
