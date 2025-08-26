@@ -10,12 +10,13 @@ import tradingRoutes from './routes/trading.route'; // Add this import
 import p2pRoutes from './routes/p2p.route'; // Import the new p2p routes
 import adminRoutes from './routes/admin.route'; // Import admin routes
 import walletRoutes from './routes/wallet.route'; // Import wallet routes
+import webhookRoutes from './routes/webhook.route'; // Import webhook routes
 
 dotenv.config();
 const app = express();
 
 // IMPORTANT: Raw body parser for webhooks MUST come before express.json()
-app.use('/api/webhooks', express.raw({ type: 'application/json' }));
+// app.use('/api/webhooks', express.raw({ type: 'application/json' }));
 
 // Regular middleware for other routes
 app.use(express.json());
@@ -30,6 +31,8 @@ app.get("/", (req, res) => {
   res.send("This is home route");
 });
 
+app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRoutes);
+
 // API routes
 app.use('/api', routes);
 app.use('/api/question', questionRoutes);
@@ -37,6 +40,8 @@ app.use('/api/trading', tradingRoutes); // Add this line
 app.use('/api/p2p', p2pRoutes); // Use the new p2p routes
 app.use('/api/admin', adminRoutes); // Use admin routes
 app.use('/api/wallet', walletRoutes); // Use wallet routes
+
+
 
 // Fix the port number in console log
 app.listen(process.env.PORT || 3001, () => {

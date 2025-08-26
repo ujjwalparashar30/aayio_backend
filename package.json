@@ -31,6 +31,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.0.0",
     "prisma": "^6.11.1",
+    "svix": "^1.75.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

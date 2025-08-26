@@ -33,7 +33,7 @@ export const getBalance = async (
     const { userId } = req.params;
 
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { clerkUserId: userId },
       select: {
         id: true,
         firstName: true,
