@@ -52,41 +52,34 @@ class PricingService {
 
 // Controllers
 export const buyTokenFromPlatform = async (
-  req: Request<{}, any, BuyTokenRequest>,
+  req: Request<{}, any, Omit<BuyTokenRequest, 'userId'>>,
   res: Response
 ): Promise<void> => {
   try {
-    const { userId, questionId, tokenType, quantity } = req.body;
+    const { questionId, tokenType, quantity } = req.body;
+    const clerkUserId = req.auth?.userId;
 
     // Validation
-    if (!userId || !questionId || !tokenType || !quantity || quantity <= 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Missing or invalid required fields'
-      });
+    if (!clerkUserId || !questionId || !tokenType || !quantity || quantity <= 0) {
+      res.status(400).json({ success: false, error: "Missing or invalid required fields" });
       return;
     }
 
-    // Start database transaction
     const result = await prisma.$transaction(async (tx) => {
-      // Get user and validate balance
+      // 1) Load the DB user via Clerk user id
       const user = await tx.user.findUnique({
-        where: { id: userId }
+        where: { clerkUserId },
       });
-
       if (!user) {
         throw new Error('User not found');
       }
+      const dbUserId = user.id;
 
-      // Get question and token data
+      // 2) Load question with tokens
       const question = await tx.question.findUnique({
         where: { id: questionId },
-        include: {
-          yesToken: true,
-          noToken: true
-        }
+        include: { yesToken: true, noToken: true },
       });
-
       if (!question || question.status !== 'ACTIVE') {
         throw new Error('Question not found or not active');
       }
@@ -96,38 +89,34 @@ export const buyTokenFromPlatform = async (
         throw new Error('Token not found');
       }
 
-      // Check available supply
+      // 3) Supply check
       if (token.availableSupply < quantity) {
         throw new Error('Insufficient token supply');
       }
 
-      // Calculate pricing
+      // 4) Pricing
       const totalCost = PricingService.calculateTotalCost(
         token.availableSupply,
         quantity,
         question.constantValue.toNumber()
       );
-
-      // Calculate platform fee
       const platformFee = totalCost * question.platformFeeRate.toNumber();
       const totalAmount = totalCost + platformFee;
 
-      // Check user balance
+      // 5) Balance check
       if (user.balance.toNumber() < totalAmount) {
         throw new Error('Insufficient balance');
       }
 
-      // Update user balance
+      // 6) Deduct balance from the authenticated user
       await tx.user.update({
-        where: { id: userId },
+        where: { id: dbUserId },
         data: {
-          balance: {
-            decrement: totalAmount
-          }
-        }
+          balance: { decrement: totalAmount },
+        },
       });
 
-      // Update token supply and price
+      // 7) Update token price/supply
       const newPrice = PricingService.calculateBuyPrice(
         token.availableSupply,
         quantity,
@@ -138,73 +127,48 @@ export const buyTokenFromPlatform = async (
         await tx.yesToken.update({
           where: { id: token.id },
           data: {
-            availableSupply: {
-              decrement: quantity
-            },
-            circulatingSupply: {
-              increment: quantity
-            },
+            availableSupply: { decrement: quantity },
+            circulatingSupply: { increment: quantity },
             currentPrice: newPrice,
-            totalVolume: {
-              increment: totalCost
-            },
-            lastTradePrice: newPrice
-          }
+            totalVolume: { increment: totalCost },
+            lastTradePrice: newPrice,
+          },
         });
 
         await tx.question.update({
           where: { id: questionId },
           data: {
-            totalYesTokens: {
-              increment: quantity
-            },
+            totalYesTokens: { increment: quantity },
             currentYesPrice: newPrice,
-            collectedFees: {
-              increment: platformFee
-            }
-          }
+            collectedFees: { increment: platformFee },
+          },
         });
       } else {
         await tx.noToken.update({
           where: { id: token.id },
           data: {
-            availableSupply: {
-              decrement: quantity
-            },
-            circulatingSupply: {
-              increment: quantity
-            },
+            availableSupply: { decrement: quantity },
+            circulatingSupply: { increment: quantity },
             currentPrice: newPrice,
-            totalVolume: {
-              increment: totalCost
-            },
-            lastTradePrice: newPrice
-          }
+            totalVolume: { increment: totalCost },
+            lastTradePrice: newPrice,
+          },
         });
 
         await tx.question.update({
           where: { id: questionId },
           data: {
-            totalNoTokens: {
-              increment: quantity
-            },
+            totalNoTokens: { increment: quantity },
             currentNoPrice: newPrice,
-            collectedFees: {
-              increment: platformFee
-            }
-          }
+            collectedFees: { increment: platformFee },
+          },
         });
       }
 
-      // Update or create user holdings
+      // 8) Update/create holdings for the authenticated DB user
       if (tokenType === TokenType.YES) {
         const existingHolding = await tx.yesTokenHolding.findUnique({
-          where: {
-            userId_questionId: {
-              userId,
-              questionId
-            }
-          }
+          where: { userId_questionId: { userId: dbUserId, questionId } },
         });
 
         if (existingHolding) {
@@ -217,28 +181,23 @@ export const buyTokenFromPlatform = async (
             data: {
               quantity: newQuantity,
               totalInvested: newTotalInvested,
-              averageBuyPrice: newAveragePrice
-            }
+              averageBuyPrice: newAveragePrice,
+            },
           });
         } else {
           await tx.yesTokenHolding.create({
             data: {
-              userId,
+              userId: dbUserId,
               questionId,
               quantity,
               totalInvested: totalCost,
-              averageBuyPrice: totalCost / quantity
-            }
+              averageBuyPrice: totalCost / quantity,
+            },
           });
         }
       } else {
         const existingHolding = await tx.noTokenHolding.findUnique({
-          where: {
-            userId_questionId: {
-              userId,
-              questionId
-            }
-          }
+          where: { userId_questionId: { userId: dbUserId, questionId } },
         });
 
         if (existingHolding) {
@@ -251,26 +210,26 @@ export const buyTokenFromPlatform = async (
             data: {
               quantity: newQuantity,
               totalInvested: newTotalInvested,
-              averageBuyPrice: newAveragePrice
-            }
+              averageBuyPrice: newAveragePrice,
+            },
           });
         } else {
           await tx.noTokenHolding.create({
             data: {
-              userId,
+              userId: dbUserId,
               questionId,
               quantity,
               totalInvested: totalCost,
-              averageBuyPrice: totalCost / quantity
-            }
+              averageBuyPrice: totalCost / quantity,
+            },
           });
         }
       }
 
-      // Create transaction record
+      // 9) Create transaction record for the authenticated DB user
       const transaction = await tx.transaction.create({
         data: {
-          userId,
+          userId: dbUserId,
           questionId,
           type: TransactionType.BUY,
           source: TransactionSource.PLATFORM_MINT,
@@ -279,35 +238,23 @@ export const buyTokenFromPlatform = async (
           pricePerToken: totalCost / quantity,
           totalAmount: totalCost,
           platformFee,
-          status: 'COMPLETED'
-        }
+          status: 'COMPLETED',
+        },
       });
 
-      return {
-        transaction,
-        newPrice,
-        totalCost,
-        platformFee,
-        totalAmount
-      };
+      return { transaction, newPrice, totalCost, platformFee, totalAmount };
     });
 
-    const response: ApiResponse<typeof result> = {
-      success: true,
-      data: result
-    };
-
-    res.json(response);
-
+    res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error buying token:', error);
-    const errorResponse: ApiResponse<never> = {
+    res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to buy token'
-    };
-    res.status(500).json(errorResponse);
+      error: error instanceof Error ? error.message : 'Failed to buy token',
+    });
   }
 };
+
 
 export const previewTrade = async (
   req: Request<{}, any, PreviewTradeRequest>,

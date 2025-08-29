@@ -9,10 +9,11 @@ import {
   previewTrade
 } from '../controllers/trading.controller';
 
+import { requireAuth } from "../middleware/clerkMiddleware";
 const router = Router();
 
 // Core trading operations (ONLY BUYING from platform)
-router.post('/buy', buyTokenFromPlatform);
+router.post("/buy", requireAuth, buyTokenFromPlatform);
 router.post('/preview', previewTrade);
 
 // Market data

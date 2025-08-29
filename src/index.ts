@@ -1,49 +1,90 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
-import bodyParser from "body-parser";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
-import routes from './routes/auth.route';
-import questionRoutes from './routes/question.route';
-import tradingRoutes from './routes/trading.route'; // Add this import
-import p2pRoutes from './routes/p2p.route'; // Import the new p2p routes
-import adminRoutes from './routes/admin.route'; // Import admin routes
-import walletRoutes from './routes/wallet.route'; // Import wallet routes
-import webhookRoutes from './routes/webhook.route'; // Import webhook routes
+import chalk from "chalk";
+import { clerkMiddleware } from "@clerk/express";
+
+
+import routes from "./routes/auth.route";
+import questionRoutes from "./routes/question.route";
+import tradingRoutes from "./routes/trading.route";
+import p2pRoutes from "./routes/p2p.route";
+import adminRoutes from "./routes/admin.route";
+import walletRoutes from "./routes/wallet.route";
+import webhookRoutes from "./routes/webhook.route";
 
 dotenv.config();
 const app = express();
 
-// IMPORTANT: Raw body parser for webhooks MUST come before express.json()
-// app.use('/api/webhooks', express.raw({ type: 'application/json' }));
+/* ✅ 1) CORS FIRST */
+const allowedOrigins: string[] = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  process.env.FRONTEND_URL || "",  // fallback to empty string if undefined
+].filter(Boolean) as string[];
 
-// Regular middleware for other routes
-app.use(express.json());
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+  })
+);
+app.options("*", cors());
+
+/* ✅ 2) Security & parsers */
 app.use(helmet());
 app.use(helmet.crossOriginResourcePolicy({ policy: "cross-origin" }));
-app.use(morgan("common"));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
-app.get("/", (req, res) => {
-  res.send("This is home route");
+/* ✅ 3) Webhooks BEFORE Clerk & JSON parsing */
+app.use("/api/webhooks", express.raw({ type: "application/json" }), webhookRoutes);
+
+
+/* ✅ 4) Clerk AFTER CORS */
+app.use(clerkMiddleware());
+
+/* ✅ 5) Logging */
+morgan.token("statusColor", (req, res) => {
+  const status = res.statusCode;
+  if (status >= 500) return chalk.red(status.toString());
+  if (status >= 400) return chalk.yellow(status.toString());
+  if (status >= 300) return chalk.cyan(status.toString());
+  if (status >= 200) return chalk.green(status.toString());
+  return chalk.white(status.toString());
+});
+app.use(
+  morgan((tokens, req, res) => {
+    return [
+      chalk.gray(tokens.date(req, res, "iso")),
+      chalk.blue(tokens.method(req, res)),
+      chalk.white(tokens.url(req, res)),
+      tokens["statusColor"](req, res),
+      chalk.magenta(tokens["response-time"](req, res) + " ms"),
+    ].join(" ");
+  })
+);
+
+/* ✅ 6) Routes */
+app.get("/", (_req, res) => res.send("🚀 Backend is running!"));
+app.use("/api", routes);
+app.use("/api/question", questionRoutes);
+app.use("/api/trading", tradingRoutes);
+app.use("/api/p2p", p2pRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/wallet", walletRoutes);
+
+/* ✅ 7) Error handler (helps debug 500s) */
+app.use((err  :any , _req : Request, res : Response, _next : NextFunction) => {
+  console.error(err);
+  res.status(err.status || 500).json({ message: err.message || "Internal Server Error" });
 });
 
-app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRoutes);
-
-// API routes
-app.use('/api', routes);
-app.use('/api/question', questionRoutes);
-app.use('/api/trading', tradingRoutes); // Add this line
-app.use('/api/p2p', p2pRoutes); // Use the new p2p routes
-app.use('/api/admin', adminRoutes); // Use admin routes
-app.use('/api/wallet', walletRoutes); // Use wallet routes
-
-
-
-// Fix the port number in console log
-app.listen(process.env.PORT || 3001, () => {
-  console.log(`Server is running on port ${process.env.PORT || 3001}`); // Fixed the port number
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(chalk.green.bold(`✅ Server running on http://localhost:${PORT}`));
 });
