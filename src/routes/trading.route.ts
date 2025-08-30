@@ -21,7 +21,7 @@ router.get('/price/:questionId', getTokenPrices);
 router.get('/stats/:questionId', getMarketStats);
 
 // User trading data
-router.get('/portfolio/:userId', getUserPortfolio);
-router.get('/history/:userId', getTradeHistory);
+router.get('/portfolio/:userId',  getUserPortfolio);
+router.get('/history/:userId',  getTradeHistory);
 
-export default router;
+export default router; 

@@ -229,23 +229,35 @@ export const addPlayMoney = async (
   }
 };
 
-
-
 export const getTransactionHistory = async (
   req: Request<{ userId: string }>,
   res: Response
 ): Promise<void> => {
   try {
-    const { userId } = req.params;
-    const { page = '1', limit = '20', type } = req.query;
+    const { userId: clerkUserId } = req.params;
+    
+    // 1. Find internal user by Clerk ID
+    const user = await prisma.user.findUnique({
+      where: { clerkUserId: clerkUserId },
+      select: { id: true }
+    });
 
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+      return; // ✅ Fixed - added return
+    }
+
+    const { page = '1', limit = '20', type } = req.query;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
     const take = parseInt(limit as string);
 
-    // Build where clause
-    const whereClause: any = { userId };
+    // 2. Build where clause with internal ID
+    const whereClause: any = { userId: user.id }; // ✅ Using internal UUID
     if (type) {
-      whereClause.type = type;
+      whereClause.type = type; // ✅ Added type filter back
     }
 
     const [transactions, totalCount] = await Promise.all([
@@ -260,7 +272,6 @@ export const getTransactionHistory = async (
 
     const totalPages = Math.ceil(totalCount / take);
 
-    // Add fun emojis and descriptions
     const enhancedTransactions = transactions.map(tx => ({
       ...tx,
       amount: tx.amount.toNumber(),
@@ -269,7 +280,7 @@ export const getTransactionHistory = async (
     }));
 
     const history = {
-      userId,
+      userId: clerkUserId, // ✅ Return Clerk ID to match frontend expectation
       transactions: enhancedTransactions,
       summary: {
         totalTransactions: totalCount,
@@ -306,6 +317,105 @@ export const getTransactionHistory = async (
     res.status(500).json(errorResponse);
   }
 };
+
+
+
+
+
+// export const getTransactionHistory = async (
+//   req: Request<{ userId: string }>,
+//   res: Response
+// ): Promise<void> => {
+//   try {
+//     const { userId: clerkUserId } = req.params;
+//     // const userId = 'cmeyovx9e0000k4af1qcjost7';
+//     const user = await prisma.user.findUnique({
+//       where: { clerkUserId: clerkUserId }, // Look up by Clerk ID
+//       select: { id: true } // Get the internal UUID
+//     });
+
+//     if (!user) {
+//       res.status(404).json({
+//         success: false,
+//         error: 'User not found'
+//       });
+//     }
+
+//     const whereClause: any = { userId: user?.id };
+//     // console.log(userId);
+    
+//     const { page = '1', limit = '20', type } = req.query;
+//     // Validate pagination params
+//     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+//     const take = parseInt(limit as string);
+
+
+//     // Build where clause
+//     // const whereClause: any = { userId };
+//     // if (type) {
+//     //   whereClause.type = type;
+//     // }
+
+
+
+//     const [transactions, totalCount] = await Promise.all([
+//       prisma.walletTransaction.findMany({
+//         where: whereClause,
+//         orderBy: { createdAt: 'desc' },
+//         skip,
+//         take
+//       }),
+//       prisma.walletTransaction.count({ where: whereClause })
+//     ]);
+
+//     const totalPages = Math.ceil(totalCount / take);
+
+//     // Add fun emojis and descriptions
+//     const enhancedTransactions = transactions.map(tx => ({
+//       ...tx,
+//       amount: tx.amount.toNumber(),
+//       friendlyType: tx.type === 'DEPOSIT' ? '💰 Money Added' : '📤 Money Spent/Transferred',
+//       emoji: tx.type === 'DEPOSIT' ? '💰' : '📤'
+//     }));
+
+//     const history = {
+//       userId,
+//       transactions: enhancedTransactions,
+//       summary: {
+//         totalTransactions: totalCount,
+//         totalDeposits: transactions
+//           .filter(tx => tx.type === 'DEPOSIT')
+//           .reduce((sum, tx) => sum + tx.amount.toNumber(), 0),
+//         totalWithdrawals: transactions
+//           .filter(tx => tx.type === 'WITHDRAWAL')
+//           .reduce((sum, tx) => sum + tx.amount.toNumber(), 0)
+//       },
+//       pagination: {
+//         page: parseInt(page as string),
+//         limit: take,
+//         total: totalCount,
+//         totalPages,
+//         hasNext: parseInt(page as string) < totalPages,
+//         hasPrev: parseInt(page as string) > 1
+//       }
+//     };
+
+//     const response: ApiResponse<typeof history> = {
+//       success: true,
+//       data: history
+//     };
+
+//     res.json(response);
+
+//   } catch (error) {
+//     console.error('Error getting transaction history:', error);
+//     const errorResponse: ApiResponse<never> = {
+//       success: false,
+//       error: 'Failed to get transaction history'
+//     };
+//     res.status(500).json(errorResponse);
+//   }
+// };
 
 
 

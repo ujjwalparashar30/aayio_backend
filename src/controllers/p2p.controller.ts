@@ -27,14 +27,15 @@ interface ApiResponse<T> {
 
 // Controllers
 export const createP2POrder = async (
-  req: Request<{}, any, CreateP2POrderRequest>,
+  req: Request<{}, any, Omit<CreateP2POrderRequest, 'userId'>>,
   res: Response
 ): Promise<void> => {
   try {
-    const { userId, questionId, orderType, tokenType, quantity, pricePerToken, expiresAt } = req.body;
+    const { questionId, orderType, tokenType, quantity, pricePerToken, expiresAt } = req.body;
+    const clerkUserId = req.auth?.userId; // Get from authenticated token
 
     // Validation
-    if (!userId || !questionId || !orderType || !tokenType || !quantity || !pricePerToken) {
+    if (!clerkUserId || !questionId || !orderType || !tokenType || !quantity || !pricePerToken) {
       res.status(400).json({
         success: false,
         error: 'Missing required fields'
@@ -52,12 +53,24 @@ export const createP2POrder = async (
 
     // Start database transaction
     const result = await prisma.$transaction(async (tx) => {
-      // Get user
+      // 1. Map Clerk ID to internal ID
       const user = await tx.user.findUnique({
-        where: { id: userId }
+        where: { clerkUserId: clerkUserId },
+        select: { id: true }
       });
 
       if (!user) {
+        throw new Error('User not found');
+      }
+
+      const internalUserId = user.id;
+
+      // Get full user data with internal ID
+      const fullUser = await tx.user.findUnique({
+        where: { id: internalUserId }
+      });
+
+      if (!fullUser) {
         throw new Error('User not found');
       }
 
@@ -74,32 +87,26 @@ export const createP2POrder = async (
 
       if (orderType === P2POrderType.BUY) {
         // BUY ORDER: User wants to buy tokens from other users
-        // Check if user has enough balance
-        if (user.balance.toNumber() < totalAmount) {
+        if (fullUser.balance.toNumber() < totalAmount) {
           throw new Error('Insufficient balance');
         }
 
         // Lock balance in escrow
         await tx.user.update({
-          where: { id: userId },
+          where: { id: internalUserId }, // Use internal ID
           data: {
-            balance: {
-              decrement: totalAmount
-            },
-            p2pEscrowBalance: {
-              increment: totalAmount
-            }
+            balance: { decrement: totalAmount },
+            p2pEscrowBalance: { increment: totalAmount }
           }
         });
       } else {
-        // SELL ORDER: User wants to sell their tokens to other users
-        // Check if user has enough tokens
+        // SELL ORDER: User wants to sell their tokens
         let userHolding;
         if (tokenType === TokenType.YES) {
           userHolding = await tx.yesTokenHolding.findUnique({
             where: {
               userId_questionId: {
-                userId,
+                userId: internalUserId, // Use internal ID
                 questionId
               }
             }
@@ -108,7 +115,7 @@ export const createP2POrder = async (
           userHolding = await tx.noTokenHolding.findUnique({
             where: {
               userId_questionId: {
-                userId,
+                userId: internalUserId, // Use internal ID
                 questionId
               }
             }
@@ -119,7 +126,6 @@ export const createP2POrder = async (
           throw new Error('Insufficient token holdings');
         }
 
-        // Check available tokens (not locked in other orders)
         const availableTokens = userHolding.quantity - userHolding.lockedInOrders;
         if (availableTokens < quantity) {
           throw new Error('Insufficient available tokens (some may be locked in other orders)');
@@ -129,28 +135,20 @@ export const createP2POrder = async (
         if (tokenType === TokenType.YES) {
           await tx.yesTokenHolding.update({
             where: { id: userHolding.id },
-            data: {
-              lockedInOrders: {
-                increment: quantity
-              }
-            }
+            data: { lockedInOrders: { increment: quantity } }
           });
         } else {
           await tx.noTokenHolding.update({
             where: { id: userHolding.id },
-            data: {
-              lockedInOrders: {
-                increment: quantity
-              }
-            }
+            data: { lockedInOrders: { increment: quantity } }
           });
         }
       }
 
-      // Create P2P order
+      // Create P2P order with internal ID
       const order = await tx.p2POrder.create({
         data: {
-          userId,
+          userId: internalUserId, // Use internal ID
           questionId,
           orderType,
           tokenType,
@@ -198,16 +196,18 @@ export const createP2POrder = async (
   }
 };
 
+
 export const matchOrder = async (
-  req: Request<{ orderId: string }, any, MatchOrderRequest>,
+  req: Request<{ orderId: string }, any, Omit<MatchOrderRequest, 'buyerUserId'>>,
   res: Response
 ): Promise<void> => {
   try {
     const { orderId } = req.params;
-    const { buyerUserId, quantity } = req.body;
+    const { quantity } = req.body;
+    const clerkUserId = req.auth?.userId; // Get buyer from auth token
 
     // Validation
-    if (!buyerUserId || !quantity || quantity <= 0) {
+    if (!clerkUserId || !quantity || quantity <= 0) {
       res.status(400).json({
         success: false,
         error: 'Missing required fields or invalid quantity'
@@ -217,6 +217,18 @@ export const matchOrder = async (
 
     // Start database transaction
     const result = await prisma.$transaction(async (tx) => {
+      // 1. Map Clerk ID to internal ID for buyer
+      const buyerUser = await tx.user.findUnique({
+        where: { clerkUserId: clerkUserId },
+        select: { id: true }
+      });
+
+      if (!buyerUser) {
+        throw new Error('Buyer not found');
+      }
+
+      const buyerUserId = buyerUser.id; // Internal ID
+
       // Get the sell order
       const sellOrder = await tx.p2POrder.findUnique({
         where: { id: orderId },
@@ -246,7 +258,7 @@ export const matchOrder = async (
         throw new Error('Requested quantity exceeds available quantity');
       }
 
-      // Get buyer
+      // Get buyer with internal ID
       const buyer = await tx.user.findUnique({
         where: { id: buyerUserId }
       });
@@ -262,28 +274,20 @@ export const matchOrder = async (
         throw new Error('Buyer has insufficient balance');
       }
 
-      // Transfer money from buyer to seller
+      // Transfer money from buyer to seller (both using internal IDs)
       await tx.user.update({
         where: { id: buyerUserId },
-        data: {
-          balance: {
-            decrement: totalCost
-          }
-        }
+        data: { balance: { decrement: totalCost } }
       });
 
       await tx.user.update({
-        where: { id: sellOrder.userId },
-        data: {
-          balance: {
-            increment: totalCost
-          }
-        }
+        where: { id: sellOrder.userId }, // sellOrder.userId is already internal ID
+        data: { balance: { increment: totalCost } }
       });
 
-      // Transfer tokens from seller to buyer
+      // Transfer tokens logic remains the same (already uses internal IDs)
       if (sellOrder.tokenType === TokenType.YES) {
-        // Update seller holdings (reduce locked and quantity)
+        // Update seller holdings
         const sellerHolding = await tx.yesTokenHolding.findUnique({
           where: {
             userId_questionId: {
@@ -298,7 +302,6 @@ export const matchOrder = async (
         }
 
         if (sellerHolding.quantity === quantity) {
-          // Delete holding if selling all tokens
           await tx.yesTokenHolding.delete({
             where: { id: sellerHolding.id }
           });
@@ -306,12 +309,8 @@ export const matchOrder = async (
           await tx.yesTokenHolding.update({
             where: { id: sellerHolding.id },
             data: {
-              quantity: {
-                decrement: quantity
-              },
-              lockedInOrders: {
-                decrement: quantity
-              }
+              quantity: { decrement: quantity },
+              lockedInOrders: { decrement: quantity }
             }
           });
         }
@@ -320,7 +319,7 @@ export const matchOrder = async (
         const buyerHolding = await tx.yesTokenHolding.findUnique({
           where: {
             userId_questionId: {
-              userId: buyerUserId,
+              userId: buyerUserId, // Use internal ID
               questionId: sellOrder.questionId
             }
           }
@@ -342,7 +341,7 @@ export const matchOrder = async (
         } else {
           await tx.yesTokenHolding.create({
             data: {
-              userId: buyerUserId,
+              userId: buyerUserId, // Use internal ID
               questionId: sellOrder.questionId,
               quantity,
               totalInvested: totalCost,
@@ -351,7 +350,7 @@ export const matchOrder = async (
           });
         }
       } else {
-        // Similar logic for NO tokens
+        // Similar logic for NO tokens (same pattern)
         const sellerHolding = await tx.noTokenHolding.findUnique({
           where: {
             userId_questionId: {
@@ -373,12 +372,8 @@ export const matchOrder = async (
           await tx.noTokenHolding.update({
             where: { id: sellerHolding.id },
             data: {
-              quantity: {
-                decrement: quantity
-              },
-              lockedInOrders: {
-                decrement: quantity
-              }
+              quantity: { decrement: quantity },
+              lockedInOrders: { decrement: quantity }
             }
           });
         }
@@ -386,7 +381,7 @@ export const matchOrder = async (
         const buyerHolding = await tx.noTokenHolding.findUnique({
           where: {
             userId_questionId: {
-              userId: buyerUserId,
+              userId: buyerUserId, // Use internal ID
               questionId: sellOrder.questionId
             }
           }
@@ -408,7 +403,7 @@ export const matchOrder = async (
         } else {
           await tx.noTokenHolding.create({
             data: {
-              userId: buyerUserId,
+              userId: buyerUserId, // Use internal ID
               questionId: sellOrder.questionId,
               quantity,
               totalInvested: totalCost,
@@ -421,9 +416,7 @@ export const matchOrder = async (
       // Update order status
       const newRemainingQuantity = sellOrder.remainingQuantity - quantity;
       const newFilledQuantity = sellOrder.filledQuantity + quantity;
-      
-      // CORRECT ✅
-    let newStatus: P2POrderStatus = P2POrderStatus.PARTIALLY_FILLED;
+      let newStatus: P2POrderStatus = P2POrderStatus.PARTIALLY_FILLED;
 
       if (newRemainingQuantity === 0) {
         newStatus = P2POrderStatus.FILLED;
@@ -439,12 +432,11 @@ export const matchOrder = async (
         }
       });
 
-      // Create transaction records
+      // Create transaction records (using internal IDs)
       const [sellerTransaction, buyerTransaction] = await Promise.all([
-        // Seller transaction (SELL)
         tx.transaction.create({
           data: {
-            userId: sellOrder.userId,
+            userId: sellOrder.userId, // Already internal ID
             questionId: sellOrder.questionId,
             type: TransactionType.SELL,
             source: TransactionSource.P2P_TRADE,
@@ -453,14 +445,13 @@ export const matchOrder = async (
             pricePerToken: sellOrder.pricePerToken,
             totalAmount: totalCost,
             p2pOrderId: orderId,
-            counterpartyId: buyerUserId,
+            counterpartyId: buyerUserId, // Internal ID
             status: 'COMPLETED'
           }
         }),
-        // Buyer transaction (BUY)
         tx.transaction.create({
           data: {
-            userId: buyerUserId,
+            userId: buyerUserId, // Internal ID
             questionId: sellOrder.questionId,
             type: TransactionType.BUY,
             source: TransactionSource.P2P_TRADE,
@@ -469,7 +460,7 @@ export const matchOrder = async (
             pricePerToken: sellOrder.pricePerToken,
             totalAmount: totalCost,
             p2pOrderId: orderId,
-            counterpartyId: sellOrder.userId,
+            counterpartyId: sellOrder.userId, // Already internal ID
             status: 'COMPLETED'
           }
         })
@@ -506,34 +497,86 @@ export const matchOrder = async (
   }
 };
 
+
 export const cancelOrder = async (
   req: Request<{ orderId: string }>,
   res: Response
 ): Promise<void> => {
   try {
     const { orderId } = req.params;
+    const clerkUserId = req.auth?.userId; // Get from authenticated session
+
+    // Check authentication
+    if (!clerkUserId) {
+      res.status(401).json({
+        success: false,
+        error: 'Unauthorized - Authentication required'
+      });
+      return;
+    }
+
+    // Map Clerk ID to internal ID
+    const user = await prisma.user.findUnique({
+      where: { clerkUserId },
+      select: { id: true }
+    });
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+      return;
+    }
+
+    const internalUserId = user.id;
 
     // Start database transaction
     const result = await prisma.$transaction(async (tx) => {
-      // Get order
+      // Get order and verify it exists
       const order = await tx.p2POrder.findUnique({
-        where: { id: orderId }
+        where: { id: orderId },
+        include: {
+          question: {
+            select: {
+              id: true,
+              title: true,
+              status: true
+            }
+          }
+        }
       });
 
       if (!order) {
         throw new Error('Order not found');
       }
 
-      if (order.status === P2POrderStatus.FILLED || order.status === P2POrderStatus.CANCELLED) {
-        throw new Error('Order cannot be cancelled');
+      // Verify ownership - user can only cancel their own orders
+      if (order.userId !== internalUserId) {
+        throw new Error('Access denied: You can only cancel your own orders');
+      }
+
+      // Check if order can be cancelled
+      if (order.status === P2POrderStatus.FILLED) {
+        throw new Error('Cannot cancel a filled order');
+      }
+
+      if (order.status === P2POrderStatus.CANCELLED) {
+        throw new Error('Order is already cancelled');
+      }
+
+      // Only allow cancelling PENDING and PARTIALLY_FILLED orders
+      if (order.status !== P2POrderStatus.PENDING && order.status !== P2POrderStatus.PARTIALLY_FILLED) {
+        throw new Error('Order cannot be cancelled in its current state');
       }
 
       if (order.orderType === P2POrderType.BUY) {
-        // Release escrowed balance
+        // BUY ORDER CANCELLATION
+        // Release escrowed balance back to available balance
         const remainingAmount = order.remainingQuantity * order.pricePerToken.toNumber();
-        
+
         await tx.user.update({
-          where: { id: order.userId },
+          where: { id: internalUserId },
           data: {
             balance: {
               increment: remainingAmount
@@ -543,30 +586,51 @@ export const cancelOrder = async (
             }
           }
         });
+
+        console.log(`💰 Released ₹${remainingAmount} from escrow back to user balance`);
+
       } else {
-        // Release locked tokens
+        // SELL ORDER CANCELLATION
+        // Release locked tokens back to available holdings
         if (order.tokenType === TokenType.YES) {
-          await tx.yesTokenHolding.update({
+          const holding = await tx.yesTokenHolding.findUnique({
             where: {
               userId_questionId: {
-                userId: order.userId,
+                userId: internalUserId,
                 questionId: order.questionId
               }
-            },
+            }
+          });
+
+          if (!holding) {
+            throw new Error('Token holding not found - cannot release locked tokens');
+          }
+
+          await tx.yesTokenHolding.update({
+            where: { id: holding.id },
             data: {
               lockedInOrders: {
                 decrement: order.remainingQuantity
               }
             }
           });
-        } else {
-          await tx.noTokenHolding.update({
+
+        } else { // NO tokens
+          const holding = await tx.noTokenHolding.findUnique({
             where: {
               userId_questionId: {
-                userId: order.userId,
+                userId: internalUserId,
                 questionId: order.questionId
               }
-            },
+            }
+          });
+
+          if (!holding) {
+            throw new Error('Token holding not found - cannot release locked tokens');
+          }
+
+          await tx.noTokenHolding.update({
+            where: { id: holding.id },
             data: {
               lockedInOrders: {
                 decrement: order.remainingQuantity
@@ -574,18 +638,42 @@ export const cancelOrder = async (
             }
           });
         }
+
+        console.log(`🎯 Released ${order.remainingQuantity} ${order.tokenType} tokens from locked status`);
       }
 
-      // Update order status
+      // Update order status to CANCELLED
       const cancelledOrder = await tx.p2POrder.update({
         where: { id: orderId },
         data: {
           status: P2POrderStatus.CANCELLED,
           updatedAt: new Date()
+        },
+        include: {
+          question: {
+            select: {
+              id: true,
+              title: true
+            }
+          },
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true
+            }
+          }
         }
       });
 
-      return cancelledOrder;
+      return {
+        ...cancelledOrder,
+        message: `Order cancelled successfully. ${
+          order.orderType === P2POrderType.BUY 
+            ? `₹${(order.remainingQuantity * order.pricePerToken.toNumber()).toLocaleString()} released from escrow.`
+            : `${order.remainingQuantity} ${order.tokenType} tokens unlocked.`
+        }`
+      };
     });
 
     const response: ApiResponse<typeof result> = {
@@ -595,15 +683,32 @@ export const cancelOrder = async (
 
     res.json(response);
 
+    console.log(`✅ Order ${orderId} cancelled successfully by user ${clerkUserId}`);
+
   } catch (error) {
-    console.error('Error cancelling order:', error);
+    console.error('❌ Error cancelling order:', error);
     const errorResponse: ApiResponse<never> = {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to cancel order'
     };
-    res.status(500).json(errorResponse);
+    
+    // Return appropriate status codes
+    if (error instanceof Error) {
+      if (error.message.includes('not found')) {
+        res.status(404).json(errorResponse);
+      } else if (error.message.includes('Access denied') || error.message.includes('only cancel')) {
+        res.status(403).json(errorResponse);
+      } else if (error.message.includes('cannot be cancelled') || error.message.includes('already cancelled')) {
+        res.status(400).json(errorResponse);
+      } else {
+        res.status(500).json(errorResponse);
+      }
+    } else {
+      res.status(500).json(errorResponse);
+    }
   }
 };
+
 
 export const getOrderBook = async (
   req: Request<{ questionId: string }>,
@@ -676,20 +781,36 @@ export const getUserOrders = async (
   res: Response
 ): Promise<void> => {
   try {
-    const { userId } = req.params;
+    const { userId: clerkUserId } = req.params;
     const { status, page = '1', limit = '20' } = req.query;
 
+    // 1. Map Clerk ID to internal ID
+    const user = await prisma.user.findUnique({
+      where: { clerkUserId: clerkUserId },
+      select: { id: true }
+    });
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+      return;
+    }
+
+    const internalUserId = user.id;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
     const take = parseInt(limit as string);
 
     const whereClause: any = {
-      userId
+      userId: internalUserId // Use internal ID
     };
 
     if (status) {
       whereClause.status = status;
     }
 
+    // 2. Query using internal ID
     const [orders, totalCount] = await Promise.all([
       prisma.p2POrder.findMany({
         where: whereClause,
@@ -715,7 +836,7 @@ export const getUserOrders = async (
     const totalPages = Math.ceil(totalCount / take);
 
     const userOrders = {
-      userId,
+      userId: clerkUserId, // Return Clerk ID to frontend
       orders,
       pagination: {
         page: parseInt(page as string),
@@ -743,6 +864,7 @@ export const getUserOrders = async (
     res.status(500).json(errorResponse);
   }
 };
+
 
 export const getOrderDetails = async (
   req: Request<{ orderId: string }>,

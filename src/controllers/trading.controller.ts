@@ -456,16 +456,104 @@ export const getMarketStats = async (
   }
 };
 
+// export const getUserPortfolio = async (
+//   req: Request<{ userId: string }>,
+//   res: Response
+// ): Promise<void> => {
+//   try {
+//     const { userId } = req.params;
+
+//     const [yesHoldings, noHoldings] = await Promise.all([
+//       prisma.yesTokenHolding.findMany({
+//         where: { userId },
+//         include: {
+//           question: {
+//             select: {
+//               id: true,
+//               title: true,
+//               status: true,
+//               currentYesPrice: true
+//             }
+//           }
+//         }
+//       }),
+//       prisma.noTokenHolding.findMany({
+//         where: { userId },
+//         include: {
+//           question: {
+//             select: {
+//               id: true,
+//               title: true,
+//               status: true,
+//               currentNoPrice: true
+//             }
+//           }
+//         }
+//       })
+//     ]);
+
+//     const portfolio = {
+//       userId,
+//       yesHoldings: yesHoldings.map(holding => ({
+//         ...holding,
+//         currentValue: holding.quantity * holding.question.currentYesPrice.toNumber(),
+//         unrealizedPnL: (holding.quantity * holding.question.currentYesPrice.toNumber()) - 
+//                       holding.totalInvested.toNumber(),
+//         availableToSell: holding.quantity - holding.lockedInOrders // Available for P2P selling
+//       })),
+//       noHoldings: noHoldings.map(holding => ({
+//         ...holding,
+//         currentValue: holding.quantity * holding.question.currentNoPrice.toNumber(),
+//         unrealizedPnL: (holding.quantity * holding.question.currentNoPrice.toNumber()) - 
+//                       holding.totalInvested.toNumber(),
+//         availableToSell: holding.quantity - holding.lockedInOrders // Available for P2P selling
+//       }))
+//     };
+
+//     const response: ApiResponse<typeof portfolio> = {
+//       success: true,
+//       data: portfolio
+//     };
+
+//     res.json(response);
+
+//   } catch (error) {
+//     console.error('Error getting user portfolio:', error);
+//     const errorResponse: ApiResponse<never> = {
+//       success: false,
+//       error: 'Failed to get user portfolio'
+//     };
+//     res.status(500).json(errorResponse);
+//   }
+// };
+
 export const getUserPortfolio = async (
   req: Request<{ userId: string }>,
   res: Response
 ): Promise<void> => {
   try {
-    const { userId } = req.params;
+    const { userId: clerkUserId } = req.params;
 
+    // 1. Map Clerk ID to internal ID
+    const user = await prisma.user.findUnique({
+      where: { clerkUserId: clerkUserId },
+      select: { id: true }
+    });
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+      return;
+    }
+
+    const internalUserId = user.id;
+
+    // 2. Use internal ID for database queries
     const [yesHoldings, noHoldings] = await Promise.all([
       prisma.yesTokenHolding.findMany({
-        where: { userId },
+        where: { userId: internalUserId }, // ✅ Using internal ID
         include: {
           question: {
             select: {
@@ -478,7 +566,7 @@ export const getUserPortfolio = async (
         }
       }),
       prisma.noTokenHolding.findMany({
-        where: { userId },
+        where: { userId: internalUserId }, // ✅ Using internal ID
         include: {
           question: {
             select: {
@@ -493,20 +581,20 @@ export const getUserPortfolio = async (
     ]);
 
     const portfolio = {
-      userId,
+      userId: clerkUserId, // ✅ Return Clerk ID to match frontend expectation
       yesHoldings: yesHoldings.map(holding => ({
         ...holding,
         currentValue: holding.quantity * holding.question.currentYesPrice.toNumber(),
         unrealizedPnL: (holding.quantity * holding.question.currentYesPrice.toNumber()) - 
                       holding.totalInvested.toNumber(),
-        availableToSell: holding.quantity - holding.lockedInOrders // Available for P2P selling
+        availableToSell: holding.quantity - holding.lockedInOrders
       })),
       noHoldings: noHoldings.map(holding => ({
         ...holding,
         currentValue: holding.quantity * holding.question.currentNoPrice.toNumber(),
         unrealizedPnL: (holding.quantity * holding.question.currentNoPrice.toNumber()) - 
                       holding.totalInvested.toNumber(),
-        availableToSell: holding.quantity - holding.lockedInOrders // Available for P2P selling
+        availableToSell: holding.quantity - holding.lockedInOrders
       }))
     };
 
@@ -527,21 +615,117 @@ export const getUserPortfolio = async (
   }
 };
 
+
+// export const getTradeHistory = async (
+//   req: Request<{ userId: string }>,
+//   res: Response
+// ): Promise<void> => {
+//   try {
+//     const { userId } = req.params;
+//     const { page = '1', limit = '20' } = req.query;
+
+//     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+//     const take = parseInt(limit as string);
+
+//     const [transactions, totalCount] = await Promise.all([
+//       prisma.transaction.findMany({
+//         where: { 
+//           userId,
+//           OR: [
+//             { source: TransactionSource.PLATFORM_MINT },
+//             { source: TransactionSource.P2P_TRADE }
+//           ]
+//         },
+//         include: {
+//           question: {
+//             select: {
+//               id: true,
+//               title: true
+//             }
+//           }
+//         },
+//         orderBy: {
+//           createdAt: 'desc'
+//         },
+//         skip,
+//         take
+//       }),
+//       prisma.transaction.count({
+//         where: { 
+//           userId,
+//           OR: [
+//             { source: TransactionSource.PLATFORM_MINT },
+//             { source: TransactionSource.P2P_TRADE }
+//           ]
+//         }
+//       })
+//     ]);
+
+//     const totalPages = Math.ceil(totalCount / take);
+
+//     const history = {
+//       userId,
+//       transactions,
+//       pagination: {
+//         page: parseInt(page as string),
+//         limit: take,
+//         total: totalCount,
+//         totalPages,
+//         hasNext: parseInt(page as string) < totalPages,
+//         hasPrev: parseInt(page as string) > 1
+//       }
+//     };
+
+//     const response: ApiResponse<typeof history> = {
+//       success: true,
+//       data: history
+//     };
+
+//     res.json(response);
+
+//   } catch (error) {
+//     console.error('Error getting trade history:', error);
+//     const errorResponse: ApiResponse<never> = {
+//       success: false,
+//       error: 'Failed to get trade history'
+//     };
+//     res.status(500).json(errorResponse);
+//   }
+// };
+
+
+
 export const getTradeHistory = async (
   req: Request<{ userId: string }>,
   res: Response
 ): Promise<void> => {
   try {
-    const { userId } = req.params;
+    const { userId: clerkUserId } = req.params;
     const { page = '1', limit = '20' } = req.query;
 
+    // 1. Map Clerk ID to internal ID
+    const user = await prisma.user.findUnique({
+      where: { clerkUserId: clerkUserId },
+      select: { id: true }
+    });
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+      return;
+    }
+
+    const internalUserId = user.id;
     const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
     const take = parseInt(limit as string);
 
+    // 2. Use internal ID for database queries
     const [transactions, totalCount] = await Promise.all([
       prisma.transaction.findMany({
         where: { 
-          userId,
+          userId: internalUserId, // ✅ Using internal ID
           OR: [
             { source: TransactionSource.PLATFORM_MINT },
             { source: TransactionSource.P2P_TRADE }
@@ -563,7 +747,7 @@ export const getTradeHistory = async (
       }),
       prisma.transaction.count({
         where: { 
-          userId,
+          userId: internalUserId, // ✅ Using internal ID
           OR: [
             { source: TransactionSource.PLATFORM_MINT },
             { source: TransactionSource.P2P_TRADE }
@@ -575,7 +759,7 @@ export const getTradeHistory = async (
     const totalPages = Math.ceil(totalCount / take);
 
     const history = {
-      userId,
+      userId: clerkUserId, // ✅ Return Clerk ID to match frontend expectation
       transactions,
       pagination: {
         page: parseInt(page as string),
