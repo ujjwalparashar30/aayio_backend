@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
 import { Webhook } from 'svix';
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import { prisma } from '../db/prisma'
 
 export const handleClerkWebhook = async (req: Request, res: Response) => {
   try {

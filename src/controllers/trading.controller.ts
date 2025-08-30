@@ -1,8 +1,7 @@
 // controllers/tradingController.ts
 import { Request, Response } from 'express';
-import { PrismaClient, TokenType, TransactionType, TransactionSource } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { TokenType, TransactionType, TransactionSource } from '@prisma/client';
+import { prisma } from '../db/prisma'
 
 // Types and Interfaces
 interface BuyTokenRequest {
@@ -262,7 +261,7 @@ export const previewTrade = async (
 ): Promise<void> => {
   try {
     const { questionId, tokenType, quantity } = req.body;
-
+    console.log("Preview trade called with:", { questionId, tokenType, quantity });
     if (!questionId || !tokenType || !quantity || quantity <= 0) {
       res.status(400).json({
         success: false,

@@ -1,8 +1,7 @@
 // controllers/walletController.ts
 import { Request, Response } from 'express';
-import { PrismaClient, WalletTransactionType, WalletTransactionStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import {  WalletTransactionType, WalletTransactionStatus } from '@prisma/client';
+import { prisma } from '../db/prisma'
 
 // Types and Interfaces
 interface AddPlayMoneyRequest {
@@ -30,6 +29,7 @@ export const getBalance = async (
   res: Response
 ): Promise<void> => {
   try {
+    // const clerkUserId = req.auth?.userId;
     const { userId } = req.params;
 
     const user = await prisma.user.findUnique({
@@ -93,239 +93,143 @@ export const addPlayMoney = async (
   req: Request<{}, any, AddPlayMoneyRequest>,
   res: Response
 ): Promise<void> => {
+  console.log("▶️ addPlayMoney controller called");
   try {
-    const { userId, amount, description } = req.body;
+    console.log("▶️ addPlayMoney called");
 
-    // Validation
-    if (!userId || !amount || amount <= 0) {
-      res.status(400).json({
+    const clerkUserId = req.auth?.userId;
+    console.log("🔑 clerkUserId:", clerkUserId);
+
+    if (!clerkUserId) {
+      console.warn("❌ Unauthorized: User not authenticated");
+      res.status(401).json({
         success: false,
-        error: 'Invalid userId or amount. Amount must be positive.'
+        error: "Unauthorized: User not authenticated",
       });
       return;
     }
 
-    // Set reasonable limits for play money (make it game-like)
-    if (amount > 100000) {
+    const { amount, description } = req.body;
+    console.log("💰 Requested amount:", amount, "| Description:", description);
+
+    // Validation
+    if (!amount || amount <= 0) {
+      console.warn("⚠️ Invalid amount provided:", amount);
       res.status(400).json({
         success: false,
-        error: '🎮 Whoa there! Maximum play money addition is ₹100,000 at once!'
+        error: "Invalid userId or amount. Amount must be positive.",
+      });
+      return;
+    }
+
+    if (amount > 100000) {
+      console.warn("⚠️ Amount too large:", amount);
+      res.status(400).json({
+        success: false,
+        error:
+          "🎮 Whoa there! Maximum play money addition is ₹100,000 at once!",
       });
       return;
     }
 
     if (amount < 1) {
+      console.warn("⚠️ Amount too small:", amount);
       res.status(400).json({
         success: false,
-        error: '🎮 Minimum play money addition is ₹1!'
+        error: "🎮 Minimum play money addition is ₹1!",
       });
       return;
     }
 
-    // Start database transaction
+    console.log("🚀 Starting transaction for clerkUserId:", clerkUserId);
+
     const result = await prisma.$transaction(async (tx) => {
       // Check if user exists
       const user = await tx.user.findUnique({
-        where: { id: userId }
+        where: { clerkUserId: clerkUserId },
       });
+      console.log("👤 User fetched:", user?.id, "| Balance:", user?.balance.toString());
 
       if (!user) {
-        throw new Error('User not found');
+        console.error("❌ User not found for clerkUserId:", clerkUserId);
+        throw new Error("User not found");
       }
 
-      // Game-like balance limit (prevent unlimited money)
-      const currentTotal = user.balance.toNumber() + user.lockedBalance.toNumber() + user.p2pEscrowBalance.toNumber();
+      // Game-like balance limit
+      const currentTotal =
+        user.balance.toNumber() +
+        user.lockedBalance.toNumber() +
+        user.p2pEscrowBalance.toNumber();
+      console.log("📊 Current total balance:", currentTotal);
+
       if (currentTotal + amount > 1000000) {
-        throw new Error('🎮 Balance limit reached! Maximum total balance is ₹10,00,000 (like a game!)');
+        console.warn("⚠️ Balance limit exceeded. Current:", currentTotal, "Attempted add:", amount);
+        throw new Error(
+          "🎮 Balance limit reached! Maximum total balance is ₹10,00,000 (like a game!)"
+        );
       }
 
       // Update user balance
+      console.log("📝 Updating balance by:", amount);
       const updatedUser = await tx.user.update({
-        where: { id: userId },
+        where: { clerkUserId: clerkUserId },
         data: {
-          balance: {
-            increment: amount
-          },
-          totalDeposited: {
-            increment: amount
-          }
-        }
+          balance: { increment: amount },
+          totalDeposited: { increment: amount },
+        },
+      });
+      console.log("✅ Updated user:", {
+        id: updatedUser.id,
+        balance: updatedUser.balance.toString(),
+        totalDeposited: updatedUser.totalDeposited.toString(),
       });
 
       // Create wallet transaction record
+      console.log("📝 Creating wallet transaction...");
       const transaction = await tx.walletTransaction.create({
         data: {
-          userId,
+          userId: updatedUser.id,
           type: WalletTransactionType.DEPOSIT,
           amount,
           status: WalletTransactionStatus.COMPLETED,
           description: description || `🎮 Play money added: ₹${amount}`,
-          paymentMethod: 'PLAY_MONEY'
-        }
+          paymentMethod: "PLAY_MONEY",
+        },
       });
+      console.log("✅ Wallet transaction created:", transaction.id);
 
       return {
         user: {
           id: updatedUser.id,
           newBalance: updatedUser.balance.toNumber(),
-          totalAdded: updatedUser.totalDeposited.toNumber()
+          totalAdded: updatedUser.totalDeposited.toNumber(),
         },
         transaction,
-        message: `🎉 Successfully added ₹${amount} play money! Happy trading!`
+        message: `🎉 Successfully added ₹${amount} play money! Happy trading!`,
       };
     });
 
+    console.log("🎯 Transaction result:", result);
+
     const response: ApiResponse<typeof result> = {
       success: true,
-      data: result
+      data: result,
     };
 
     res.json(response);
+    console.log("✅ Response sent successfully");
 
   } catch (error) {
-    console.error('Error adding play money:', error);
+    console.error("🔥 Error adding play money:", error);
     const errorResponse: ApiResponse<never> = {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to add play money'
+      error: error instanceof Error ? error.message : "Failed to add play money",
     };
     res.status(500).json(errorResponse);
   }
 };
 
-export const transferMoney = async (
-  req: Request<{}, any, TransferMoneyRequest>,
-  res: Response
-): Promise<void> => {
-  try {
-    const { fromUserId, toUserId, amount, description } = req.body;
 
-    // Validation
-    if (!fromUserId || !toUserId || !amount || amount <= 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid transfer details. Amount must be positive.'
-      });
-      return;
-    }
-
-    if (fromUserId === toUserId) {
-      res.status(400).json({
-        success: false,
-        error: '🎮 You cannot transfer money to yourself!'
-      });
-      return;
-    }
-
-    // Game-like transfer limits
-    if (amount > 50000) {
-      res.status(400).json({
-        success: false,
-        error: '🎮 Maximum transfer amount is ₹50,000!'
-      });
-      return;
-    }
-
-    // Start database transaction
-    const result = await prisma.$transaction(async (tx) => {
-      // Get both users
-      const [fromUser, toUser] = await Promise.all([
-        tx.user.findUnique({ where: { id: fromUserId } }),
-        tx.user.findUnique({ where: { id: toUserId } })
-      ]);
-
-      if (!fromUser) {
-        throw new Error('Sender not found');
-      }
-
-      if (!toUser) {
-        throw new Error('Recipient not found');
-      }
-
-      // Check sender balance
-      if (fromUser.balance.toNumber() < amount) {
-        throw new Error('🎮 Insufficient balance for transfer!');
-      }
-
-      // Update balances
-      const [updatedFromUser, updatedToUser] = await Promise.all([
-        tx.user.update({
-          where: { id: fromUserId },
-          data: {
-            balance: { decrement: amount },
-            totalWithdrawn: { increment: amount }
-          }
-        }),
-        tx.user.update({
-          where: { id: toUserId },
-          data: {
-            balance: { increment: amount },
-            totalDeposited: { increment: amount }
-          }
-        })
-      ]);
-
-      // Create transaction records
-      const [senderTransaction, receiverTransaction] = await Promise.all([
-        tx.walletTransaction.create({
-          data: {
-            userId: fromUserId,
-            type: WalletTransactionType.WITHDRAWAL,
-            amount,
-            status: WalletTransactionStatus.COMPLETED,
-            description: description || `🎮 Transfer to ${toUser.firstName} ${toUser.lastName}`,
-            paymentMethod: 'TRANSFER'
-          }
-        }),
-        tx.walletTransaction.create({
-          data: {
-            userId: toUserId,
-            type: WalletTransactionType.DEPOSIT,
-            amount,
-            status: WalletTransactionStatus.COMPLETED,
-            description: description || `🎮 Transfer from ${fromUser.firstName} ${fromUser.lastName}`,
-            paymentMethod: 'TRANSFER'
-          }
-        })
-      ]);
-
-      return {
-        transfer: {
-          amount,
-          from: {
-            id: fromUserId,
-            name: `${fromUser.firstName} ${fromUser.lastName}`,
-            newBalance: updatedFromUser.balance.toNumber()
-          },
-          to: {
-            id: toUserId,
-            name: `${toUser.firstName} ${toUser.lastName}`,
-            newBalance: updatedToUser.balance.toNumber()
-          }
-        },
-        transactions: {
-          sender: senderTransaction,
-          receiver: receiverTransaction
-        },
-        message: `🎉 Successfully transferred ₹${amount} to ${toUser.firstName}!`
-      };
-    });
-
-    const response: ApiResponse<typeof result> = {
-      success: true,
-      data: result
-    };
-
-    res.json(response);
-
-  } catch (error) {
-    console.error('Error transferring money:', error);
-    const errorResponse: ApiResponse<never> = {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to transfer money'
-    };
-    res.status(500).json(errorResponse);
-  }
-};
 
 export const getTransactionHistory = async (
   req: Request<{ userId: string }>,
@@ -402,3 +306,142 @@ export const getTransactionHistory = async (
     res.status(500).json(errorResponse);
   }
 };
+
+
+
+
+// export const transferMoney = async (
+//   req: Request<{}, any, TransferMoneyRequest>,
+//   res: Response
+// ): Promise<void> => {
+//   try {
+//     const { fromUserId, toUserId, amount, description } = req.body;
+
+//     // Validation
+//     if (!fromUserId || !toUserId || !amount || amount <= 0) {
+//       res.status(400).json({
+//         success: false,
+//         error: 'Invalid transfer details. Amount must be positive.'
+//       });
+//       return;
+//     }
+
+//     if (fromUserId === toUserId) {
+//       res.status(400).json({
+//         success: false,
+//         error: '🎮 You cannot transfer money to yourself!'
+//       });
+//       return;
+//     }
+
+//     // Game-like transfer limits
+//     if (amount > 50000) {
+//       res.status(400).json({
+//         success: false,
+//         error: '🎮 Maximum transfer amount is ₹50,000!'
+//       });
+//       return;
+//     }
+
+//     // Start database transaction
+//     const result = await prisma.$transaction(async (tx) => {
+//       // Get both users
+//       const [fromUser, toUser] = await Promise.all([
+//         tx.user.findUnique({ where: { id: fromUserId } }),
+//         tx.user.findUnique({ where: { id: toUserId } })
+//       ]);
+
+//       if (!fromUser) {
+//         throw new Error('Sender not found');
+//       }
+
+//       if (!toUser) {
+//         throw new Error('Recipient not found');
+//       }
+
+//       // Check sender balance
+//       if (fromUser.balance.toNumber() < amount) {
+//         throw new Error('🎮 Insufficient balance for transfer!');
+//       }
+
+//       // Update balances
+//       const [updatedFromUser, updatedToUser] = await Promise.all([
+//         tx.user.update({
+//           where: { id: fromUserId },
+//           data: {
+//             balance: { decrement: amount },
+//             totalWithdrawn: { increment: amount }
+//           }
+//         }),
+//         tx.user.update({
+//           where: { id: toUserId },
+//           data: {
+//             balance: { increment: amount },
+//             totalDeposited: { increment: amount }
+//           }
+//         })
+//       ]);
+
+//       // Create transaction records
+//       const [senderTransaction, receiverTransaction] = await Promise.all([
+//         tx.walletTransaction.create({
+//           data: {
+//             userId: fromUserId,
+//             type: WalletTransactionType.WITHDRAWAL,
+//             amount,
+//             status: WalletTransactionStatus.COMPLETED,
+//             description: description || `🎮 Transfer to ${toUser.firstName} ${toUser.lastName}`,
+//             paymentMethod: 'TRANSFER'
+//           }
+//         }),
+//         tx.walletTransaction.create({
+//           data: {
+//             userId: toUserId,
+//             type: WalletTransactionType.DEPOSIT,
+//             amount,
+//             status: WalletTransactionStatus.COMPLETED,
+//             description: description || `🎮 Transfer from ${fromUser.firstName} ${fromUser.lastName}`,
+//             paymentMethod: 'TRANSFER'
+//           }
+//         })
+//       ]);
+
+//       return {
+//         transfer: {
+//           amount,
+//           from: {
+//             id: fromUserId,
+//             name: `${fromUser.firstName} ${fromUser.lastName}`,
+//             newBalance: updatedFromUser.balance.toNumber()
+//           },
+//           to: {
+//             id: toUserId,
+//             name: `${toUser.firstName} ${toUser.lastName}`,
+//             newBalance: updatedToUser.balance.toNumber()
+//           }
+//         },
+//         transactions: {
+//           sender: senderTransaction,
+//           receiver: receiverTransaction
+//         },
+//         message: `🎉 Successfully transferred ₹${amount} to ${toUser.firstName}!`
+//       };
+//     });
+
+//     const response: ApiResponse<typeof result> = {
+//       success: true,
+//       data: result
+//     };
+
+//     res.json(response);
+
+//   } catch (error) {
+//     console.error('Error transferring money:', error);
+//     const errorResponse: ApiResponse<never> = {
+//       success: false,
+//       error: error instanceof Error ? error.message : 'Failed to transfer money'
+//     };
+//     res.status(500).json(errorResponse);
+//   }
+// };
+

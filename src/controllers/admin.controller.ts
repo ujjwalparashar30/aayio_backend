@@ -1,8 +1,7 @@
 // controllers/adminController.ts
 import { Request, Response } from 'express';
-import { PrismaClient, QuestionStatus, TokenType, TransactionSource, PayoutStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { QuestionStatus, TokenType, TransactionSource, PayoutStatus } from '@prisma/client';
+import { prisma } from '../db/prisma'
 
 // Types and Interfaces
 interface CreateQuestionRequest {

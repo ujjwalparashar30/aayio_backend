@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient, QuestionStatus, TokenType } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { QuestionStatus, TokenType } from '@prisma/client';
+import { prisma } from '../db/prisma'
 
 // Types and Interfaces
 interface GetAllQuestionsQuery {

@@ -1,8 +1,6 @@
 import { Request, Response } from "express";
 import { verifyWebhook } from '@clerk/express/webhooks';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/prisma'
 
 export const syncUser = async (req: Request, res: Response): Promise<void> => {
   console.log("Syncing user with Clerk ID:", req.body.clerkId);

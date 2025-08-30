@@ -70,6 +70,10 @@ app.use(
 );
 
 /* ✅ 6) Routes */
+app.use((req, res, next) => {
+  console.log(`📡 Incoming: ${req.method} ${req.originalUrl}`);
+  next();
+});
 app.get("/", (_req, res) => res.send("🚀 Backend is running!"));
 app.use("/api", routes);
 app.use("/api/question", questionRoutes);

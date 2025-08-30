@@ -1,8 +1,7 @@
 // controllers/p2pController.ts
 import { Request, Response } from 'express';
-import { PrismaClient, TokenType, P2POrderType, P2POrderStatus, TransactionType, TransactionSource } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { TokenType, P2POrderType, P2POrderStatus, TransactionType, TransactionSource } from '@prisma/client';
+import { prisma } from '../db/prisma'
 
 // Types and Interfaces
 interface CreateP2POrderRequest {
